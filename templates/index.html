@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Live ECG Monitor</title>
+
+<!-- Console / terminal font -->
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<!-- Plotly -->
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+<style>
+/* ===========================
+   🎛 COLOR CONFIGURATION
+   Change ONLY these values
+   =========================== */
+:root {
+    --bg-main: #000000;          /* Page background */
+    --bg-plot: #000000;          /* Plot background */
+    --text-main: #ffffff;        /* Text color */
+    --ecg-line: #00ff66;         /* ECG waveform */
+    --grid-major: #003300;       /* Major grid */
+    --grid-minor: #001a00;       /* Minor grid */
+    --axis-line: #00ff66;        /* Axis lines */
+}
+
+/* ===========================
+   Global Styling
+   =========================== */
+body {
+    margin: 0;
+    background-color: var(--bg-main);
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--text-main);
+}
+
+#header {
+    text-align: center;
+    padding: 12px;
+    font-size: 22px;
+    letter-spacing: 2px;
+}
+
+#ecg {
+    width: 100vw;
+    height: 90vh;
+}
+</style>
+</head>
+
+<body>
+
+<div id="header">LIVE ECG MONITOR</div>
+<div id="ecg"></div>
+
+<script>
+/* ===========================
+   Configuration
+   =========================== */
+const sampleRate = 20;
+const displayWindowSeconds = 10;
+
+let ecgX = [];
+let ecgY = [];
+let currentSecond = 0;
+
+/* ===========================
+   Plot Layout
+   =========================== */
+const layout = {
+    paper_bgcolor: getComputedStyle(document.documentElement)
+        .getPropertyValue('--bg-main'),
+    plot_bgcolor: getComputedStyle(document.documentElement)
+        .getPropertyValue('--bg-plot'),
+
+    xaxis: {
+        title: "Time (seconds)",
+        color: getComputedStyle(document.documentElement)
+            .getPropertyValue('--text-main'),
+        gridcolor: getComputedStyle(document.documentElement)
+            .getPropertyValue('--grid-major'),
+        zeroline: false,
+        range: [0, displayWindowSeconds]
+    },
+
+    yaxis: {
+        title: "Amplitude",
+        color: getComputedStyle(document.documentElement)
+            .getPropertyValue('--text-main'),
+        gridcolor: getComputedStyle(document.documentElement)
+            .getPropertyValue('--grid-major'),
+        zeroline: false,
+        range: [-0.6, 1.2]
+    },
+
+    font: {
+        family: "Share Tech Mono",
+        color: getComputedStyle(document.documentElement)
+            .getPropertyValue('--text-main')
+    }
+};
+
+/* ===========================
+   Initialize Plot
+   =========================== */
+Plotly.newPlot("ecg", [{
+    x: ecgX,
+    y: ecgY,
+    mode: "lines",
+    line: {
+        color: getComputedStyle(document.documentElement)
+            .getPropertyValue('--ecg-line'),
+        width: 2
+    }
+}], layout, { displayModeBar: false });
+
+/* ===========================
+   Data Update Loop
+   =========================== */
+async function updateEcg() {
+    try {
+        const response = await fetch("/ecg");
+        const data = await response.json();
+
+        if (!data.ecgValues || data.ecgValues.length === 0) return;
+
+        const values = data.ecgValues;
+        const xValues = values.map((_, i) =>
+            currentSecond + i / sampleRate
+        );
+
+        ecgX.push(...xValues);
+        ecgY.push(...values);
+
+        const windowStart = Math.max(
+            0,
+            currentSecond - displayWindowSeconds + 1
+        );
+        const windowEnd = windowStart + displayWindowSeconds;
+
+        // Trim old points
+        while (ecgX.length && ecgX[0] < windowStart) {
+            ecgX.shift();
+            ecgY.shift();
+        }
+
+        Plotly.update("ecg", {
+            x: [ecgX],
+            y: [ecgY]
+        }, {
+            "xaxis.range": [windowStart, windowEnd]
+        });
+
+        currentSecond += 1;
+
+    } catch (err) {
+        console.error("ECG fetch failed");
+    }
+}
+
+setInterval(updateEcg, 1000);
+</script>
+
+</body>
+</html>
