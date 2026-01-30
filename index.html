@@ -1,112 +1,182 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Real-Time 3D Pose</title>
+  <title>3D Push-up Analysis</title>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
+
 <body>
 
+<div id="angles" style="
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  color: white;
+  font-family: monospace;
+  background: rgba(0,0,0,0.6);
+  padding: 10px;
+  border-radius: 8px;">
+</div>
 
 <script>
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
-
-const camera = new THREE.PerspectiveCamera(
-  75, window.innerWidth / window.innerHeight, 0.1, 1000
-);
-camera.position.set(0, 0, 2);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-const socket = io("http://localhost:5000");
-
-const POSE_CONNECTIONS = [
-  [11,13],[13,15],
-  [12,14],[14,16],
-  [11,12],
-  [11,23],[12,24],
-  [23,24],
-  [23,25],[25,27],
-  [24,26],[26,28],
-  [27,31],[28,32],
-  [15,17],[15,19],
-  [16,18],[16,20]
-];
+/* ---------------- GLOBALS ---------------- */
 
 let joints = [];
 let bones = [];
-const SMOOTHING = 0.6; // higher = smoother
+let frameCount = 0;
+let skeletonInitialized = false;
 
-// Create joints
-function initSkeleton(data) {
-  data.forEach(() => {
-    const joint = new THREE.Mesh(
+let totalError = { neck:0, elbow:0, body:0, knee:0 };
+
+const SMOOTHING = 0.75;
+
+const IDEAL = {
+  neck:  { min:160, max:180, worst:120 },
+  elbow: { min:80,  max:110, worst:160 },
+  body:  { min:165, max:180, worst:140 },
+  knee:  { min:160, max:180, worst:120 }
+};
+
+const POSE_CONNECTIONS = [
+  [11,13],[13,15],[12,14],[14,16],[11,12],
+  [11,23],[12,24],[23,24],[23,25],[25,27],
+  [24,26],[26,28]
+];
+
+/* ---------------- THREE.JS ---------------- */
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+camera.position.set(0,0,2);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+/* ---------------- HELPERS ---------------- */
+
+function angleBetween(a,b,c){
+  const ab = new THREE.Vector3().subVectors(a,b);
+  const cb = new THREE.Vector3().subVectors(c,b);
+  return Math.acos(ab.dot(cb)/(ab.length()*cb.length()))*(180/Math.PI);
+}
+
+function angleColor(v,i){
+  if(v>=i.min && v<=i.max) return "rgb(0,255,0)";
+  const d = Math.min(Math.abs(v-i.min),Math.abs(v-i.max));
+  const t = Math.min(d/Math.abs(i.worst-i.min),1);
+  return `rgb(${255*t},${255*(1-t)},0)`;
+}
+
+function angleError(v,i){
+  if(v>=i.min && v<=i.max) return 0;
+  const d = Math.min(Math.abs(v-i.min),Math.abs(v-i.max));
+  return Math.min(d/Math.abs(i.worst-i.min),1);
+}
+
+/* ---------------- SKELETON ---------------- */
+
+function initSkeleton(data){
+  data.forEach(()=>{
+    const j = new THREE.Mesh(
       new THREE.SphereGeometry(0.015),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
+      new THREE.MeshBasicMaterial({color:0xffffff})
     );
-    scene.add(joint);
-    joints.push(joint);
+    scene.add(j);
+    joints.push(j);
   });
 
-  POSE_CONNECTIONS.forEach(() => {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      'position',
-      new THREE.Float32BufferAttribute([0,0,0, 0,0,0], 3)
-    );
-    const line = new THREE.Line(
-      geometry,
-      new THREE.LineBasicMaterial({ color: 0x00ff00 })
-    );
-    scene.add(line);
-    bones.push(line);
+  POSE_CONNECTIONS.forEach(()=>{
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute([0,0,0,0,0,0],3));
+    const l = new THREE.Line(g,new THREE.LineBasicMaterial({color:0x00ff00}));
+    scene.add(l);
+    bones.push(l);
   });
 }
 
-// Update joints & bones
-function updateSkeleton(data) {
-  data.forEach((p, i) => {
+function updateSkeleton(data){
+  if(!data || joints.length===0) return;
+
+  data.forEach((p,i)=>{
     joints[i].position.lerp(
-      new THREE.Vector3(p.x, -p.y, -p.z),
-      1 - SMOOTHING
+      new THREE.Vector3(p.x,-p.y,-p.z),
+      1-SMOOTHING
     );
   });
 
-  bones.forEach((bone, i) => {
-    const [a, b] = POSE_CONNECTIONS[i];
-    const pos = bone.geometry.attributes.position.array;
-
-    pos[0] = joints[a].position.x;
-    pos[1] = joints[a].position.y;
-    pos[2] = joints[a].position.z;
-
-    pos[3] = joints[b].position.x;
-    pos[4] = joints[b].position.y;
-    pos[5] = joints[b].position.z;
-
-    bone.geometry.attributes.position.needsUpdate = true;
+  bones.forEach((b,i)=>{
+    const [a,c] = POSE_CONNECTIONS[i];
+    const p = b.geometry.attributes.position.array;
+    p.set([
+      joints[a].position.x,joints[a].position.y,joints[a].position.z,
+      joints[c].position.x,joints[c].position.y,joints[c].position.z
+    ]);
+    b.geometry.attributes.position.needsUpdate = true;
   });
+
+  const A=joints;
+  const ang={
+    neck:angleBetween(A[11].position,A[0].position,A[12].position),
+    elbow:angleBetween(A[11].position,A[13].position,A[15].position),
+    body:angleBetween(A[11].position,A[23].position,A[27].position),
+    knee:angleBetween(A[23].position,A[25].position,A[27].position)
+  };
+
+  frameCount++;
+  for(let k in ang) totalError[k]+=angleError(ang[k],IDEAL[k]);
+
+  angles.innerHTML=`
+    <div style="color:${angleColor(ang.neck,IDEAL.neck)}">Neck: ${ang.neck.toFixed(1)}°</div>
+    <div style="color:${angleColor(ang.elbow,IDEAL.elbow)}">Elbow: ${ang.elbow.toFixed(1)}°</div>
+    <div style="color:${angleColor(ang.body,IDEAL.body)}">Body: ${ang.body.toFixed(1)}°</div>
+    <div style="color:${angleColor(ang.knee,IDEAL.knee)}">Knee: ${ang.knee.toFixed(1)}°</div>
+  `;
 }
 
-socket.on("pose_data", data => {
-  if (joints.length === 0) {
+/* ---------------- FINAL REPORT ---------------- */
+
+function showFinalReport(){
+  let avg={},sum=0;
+  for(let k in totalError){
+    avg[k]=totalError[k]/frameCount;
+    sum+=avg[k];
+  }
+  const acc=(1-(sum/4))*100;
+
+  angles.innerHTML=`
+    <b>-/-| PUSH-UP REPORT</b><br><br>
+    Neck: ${(100-avg.neck*100).toFixed(1)}%<br>
+    Elbow: ${(100-avg.elbow*100).toFixed(1)}%<br>
+    Body: ${(100-avg.body*100).toFixed(1)}%<br>
+    Knee: ${(100-avg.knee*100).toFixed(1)}%<br><br>
+    <b>Overall Accuracy: ${acc.toFixed(1)}%</b>
+  `;
+}
+
+/* ---------------- SOCKET ---------------- */
+
+const socket = io("http://localhost:5000");
+
+socket.on("pose", data=>{
+  if(data==="END"){ showFinalReport(); return; }
+  if(!skeletonInitialized){
     initSkeleton(data);
+    skeletonInitialized=true;
   }
   updateSkeleton(data);
 });
 
-function animate() {
+/* ---------------- RENDER LOOP ---------------- */
+
+(function animate(){
   requestAnimationFrame(animate);
-  renderer.render(scene, camera);
-}
-animate();
+  renderer.render(scene,camera);
+})();
 </script>
-
-
-
 
 </body>
 </html>
