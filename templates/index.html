@@ -20,17 +20,12 @@ body {
 
 #layout {
     display: grid;
-    grid-template-columns: 22% 78%;
+    grid-template-columns: 22% 56% 22%;
     height: 100vh;
 }
 
-#left {
-    padding: 12px;
-}
-
-.plot {
-    height: 44vh;
-}
+#left { padding: 12px; }
+.plot { height: 44vh; }
 
 #posePanel {
     display: flex;
@@ -39,19 +34,31 @@ body {
 }
 
 #poseBox {
-    
     width: 96%;
     height: 94%;
-    background: #000000;
+    background: #000;
     border-radius: 26px;
-    box-shadow: inset 0 0 0 2px #000000, 0 0 50px rgba(0,0,0,0.9);
-    
-    
+    box-shadow: inset 0 0 0 2px #000, 0 0 50px rgba(0,0,0,0.9);
+    position: relative;
 }
 
-#poseCanvas {
-    width: 100%;
-    height: 100%;
+#poseCanvas { width: 100%; height: 100%; }
+
+#analysisOverlay {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    background: rgba(0,0,0,0.65);
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-family: monospace;
+    font-size: 14px;
+    z-index: 5;
+}
+
+#aiPanel {
+    background: black;
+    border-left: 1px solid #222;
 }
 </style>
 </head>
@@ -60,35 +67,30 @@ body {
 
 <div id="layout">
 
-    <div id="left">
-        <h3>ECG</h3>
-        <div id="ecgPlot" class="plot"></div>
-
-        <h3>EMG</h3>
-        <div id="emgPlot" class="plot"></div>
-    </div>
-
-    <div id="posePanel">
-    <div id="poseBox">
-
-        <!-- ===== PUSH-UP ANALYSIS OVERLAY ===== -->
-        <div id="analysisOverlay">
-            <div id="angleNeck">Neck: --</div>
-            <div id="angleElbow">Elbow: --</div>
-            <div id="angleBody">Body: --</div>
-            <div id="angleKnee">Knee: --</div>
-
-            <hr>
-
-            <div id="repCounter">Reps: 0</div>
-        </div>
-
-        <!-- ===== THREE.JS CANVAS ===== -->
-        <div id="poseCanvas"></div>
-
-    </div>
+<div id="left">
+    <h3>ECG</h3>
+    <div id="ecgPlot" class="plot"></div>
+    <h3>EMG</h3>
+    <div id="emgPlot" class="plot"></div>
 </div>
 
+<div id="posePanel">
+<div id="poseBox">
+
+<div id="analysisOverlay">
+    <div id="angleNeck">Neck: --</div>
+    <div id="angleElbow">Elbow: --</div>
+    <div id="angleBody">Body: --</div>
+    <div id="angleKnee">Knee: --</div>
+    <hr>
+    <div id="repCounter">Reps: 0</div>
+</div>
+
+<div id="poseCanvas"></div>
+</div>
+</div>
+
+<div id="aiPanel"></div>
 
 </div>
 
@@ -103,8 +105,8 @@ function baseLayout(title, range) {
         title,
         paper_bgcolor:"black",
         plot_bgcolor:"black",
-        xaxis:{range:[0,displayWindowSeconds], gridcolor:"#003300"},
-        yaxis:{range, gridcolor:"#003300"},
+        xaxis:{range:[0,displayWindowSeconds]},
+        yaxis:{range},
         font:{color:"white"}
     };
 }
@@ -140,10 +142,7 @@ setInterval(updateSignals,1000);
 
 /* ================= MEDIAPIPE 3D ================= */
 const container = document.getElementById("poseCanvas");
-
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1e1e1e);
-
 const camera = new THREE.PerspectiveCamera(50,1,0.01,100);
 camera.position.set(0,1.2,4);
 
@@ -162,60 +161,62 @@ const skeleton = new THREE.Group();
 scene.add(skeleton);
 
 const POSE_CONNECTIONS = [
-
-  /* ===== ARMS ===== */
-  [11,13],[13,15],
-  [15,17],[15,19],[15,21],      // left hand
-  [12,14],[14,16],
-  [16,18],[16,20],[16,22],      // right hand
-
-  /* ===== TORSO ===== */
-  [11,12],
-  [11,23],[12,24],
-  [23,24],
-
-  /* ===== LEGS ===== */
-  [23,25],[25,27],
-  [24,26],[26,28]
+  [11,13],[13,15],[15,17],[12,14],[14,16],[16,18],
+  [11,12],[11,23],[12,24],[23,24],
+  [23,25],[25,27],[24,26],[26,28]
 ];
 
 let joints=[], bones=[], initialized=false;
 
 /* ================= PUSH-UP ANALYSIS ================= */
+let repCount=0,lastElbowAngle=180;
 
-let repCount = 0;
-let lastElbowAngle = 180;
-
-const IDEAL = {
-    neck:  { min:160, max:180, worst:120 },
-    elbow: { min:80,  max:110, worst:160 },
-    body:  { min:165, max:180, worst:140 },
-    knee:  { min:160, max:180, worst:120 }
+const IDEAL={
+  neck:{min:160,max:180,worst:120},
+  elbow:{min:80,max:110,worst:160},
+  body:{min:165,max:180,worst:140},
+  knee:{min:160,max:180,worst:120}
 };
 
+let badCounts={neck:0,elbow:0,body:0,knee:0};
 
 function angleBetween(a,b,c){
-    const ab = new THREE.Vector3().subVectors(a,b);
-    const cb = new THREE.Vector3().subVectors(c,b);
-    return Math.acos(
-        ab.dot(cb) / (ab.length() * cb.length())
-    ) * (180 / Math.PI);
+    const ab=new THREE.Vector3().subVectors(a,b);
+    const cb=new THREE.Vector3().subVectors(c,b);
+    return Math.acos(ab.dot(cb)/(ab.length()*cb.length()))*(180/Math.PI);
 }
 
-function angleColor(v, ideal){
-    if (v >= ideal.min && v <= ideal.max) return "rgb(0,255,0)";
+function angleState(v, ideal){
+    // Inside ideal range → GOOD
+    if (v >= ideal.min && v <= ideal.max) {
+        return "good";
+    }
 
-    const d = Math.min(
+    // Distance from nearest ideal bound
+    const deviation = Math.min(
         Math.abs(v - ideal.min),
         Math.abs(v - ideal.max)
     );
 
-    const t = Math.min(
-        d / Math.abs(ideal.worst - ideal.min),
-        1
-    );
+    const maxDeviation = Math.abs(ideal.worst - ideal.min);
+    const severity = deviation / maxDeviation;
 
-    return `rgb(${255*t}, ${255*(1-t)}, 0)`;
+    /*
+      Severity scale (VERY tolerant):
+      0.0 – 0.75 → still GOOD (normal human variance)
+      0.75 – 0.9 → WARN (clear form degradation)
+      0.9 – 1.0 → BAD  (danger / collapse)
+    */
+
+    if (severity < 0.75) {
+        return "good";
+    }
+
+    if (severity < 0.9) {
+        return "warn";
+    }
+
+    return "bad";
 }
 
 
@@ -228,7 +229,6 @@ function initSkeleton(data){
         );
         skeleton.add(j); joints.push(j);
     });
-
     POSE_CONNECTIONS.forEach(()=>{
         const g=new THREE.BufferGeometry();
         g.setAttribute("position",new THREE.Float32BufferAttribute([0,0,0,0,0,0],3));
@@ -237,95 +237,80 @@ function initSkeleton(data){
     });
 }
 
-
-
 function updateSkeleton(data){
-    // Anchor at shoulders (better full-body framing)
-    const sL = data[11];
-    const sR = data[12];
-    const Y_OFFSET = -1; // 🔼 moves skeleton UP (increase = higher)
-
-
-
-    const cx = (sL.x + sR.x) / 2;
-    const cy = (sL.y + sR.y) / 2 - Y_OFFSET;
-    const cz = (sL.z + sR.z) / 2;
-
-    const SCALE = 2.0;
+    const sL=data[11],sR=data[12];
+    const cx=(sL.x+sR.x)/2;
+    const cy=(sL.y+sR.y)/2+1;
+    const cz=(sL.z+sR.z)/2;
 
     data.forEach((p,i)=>{
-        joints[i].position.set(
-            (p.x - cx) * SCALE,
-            -(p.y - cy) * SCALE,
-            -(p.z - cz) * SCALE
-        );
+        joints[i].position.set((p.x-cx)*2,-(p.y-cy)*2,-(p.z-cz)*2);
     });
 
     bones.forEach((b,i)=>{
-        const [a,c] = POSE_CONNECTIONS[i];
-        const pos = b.geometry.attributes.position.array;
-        pos[0] = joints[a].position.x;
-        pos[1] = joints[a].position.y;
-        pos[2] = joints[a].position.z;
-        pos[3] = joints[c].position.x;
-        pos[4] = joints[c].position.y;
-        pos[5] = joints[c].position.z;
-        b.geometry.attributes.position.needsUpdate = true;
+        const[a,c]=POSE_CONNECTIONS[i];
+        b.geometry.attributes.position.array.set([
+            joints[a].position.x,joints[a].position.y,joints[a].position.z,
+            joints[c].position.x,joints[c].position.y,joints[c].position.z
+        ]);
+        b.geometry.attributes.position.needsUpdate=true;
     });
 
-    /* ===== PUSH-UP METRICS ===== */
-const A = joints;
+    const A=joints;
+    const ang={
+        neck:angleBetween(A[11].position,A[0].position,A[12].position),
+        elbow:angleBetween(A[11].position,A[13].position,A[15].position),
+        body:angleBetween(A[11].position,A[23].position,A[27].position),
+        knee:angleBetween(A[23].position,A[25].position,A[27].position)
+    };
 
-const ang = {
-    neck:  angleBetween(A[11].position, A[0].position, A[12].position),
-    elbow: angleBetween(A[11].position, A[13].position, A[15].position),
-    body:  angleBetween(A[11].position, A[23].position, A[27].position),
-    knee:  angleBetween(A[23].position, A[25].position, A[27].position)
-};
+    const states={
+        neck:angleState(ang.neck,IDEAL.neck),
+        elbow:angleState(ang.elbow,IDEAL.elbow),
+        body:angleState(ang.body,IDEAL.body),
+        knee:angleState(ang.knee,IDEAL.knee)
+    };
 
-/* Rep counting (elbow dip logic) */
-if (lastElbowAngle > 100 && ang.elbow < 100) {
-    repCount++;
-}
-lastElbowAngle = ang.elbow;
+    for(const k in states) if(states[k]==="bad") badCounts[k]++;
 
-/* Update overlay */
-document.getElementById("angleNeck").innerHTML =
-    `Neck: <span style="color:${angleColor(ang.neck,IDEAL.neck)}">${ang.neck.toFixed(1)}°</span>`;
+    if(lastElbowAngle>100&&ang.elbow<100) repCount++;
+    lastElbowAngle=ang.elbow;
 
-document.getElementById("angleElbow").innerHTML =
-    `Elbow: <span style="color:${angleColor(ang.elbow,IDEAL.elbow)}">${ang.elbow.toFixed(1)}°</span>`;
-
-document.getElementById("angleBody").innerHTML =
-    `Body: <span style="color:${angleColor(ang.body,IDEAL.body)}">${ang.body.toFixed(1)}°</span>`;
-
-document.getElementById("angleKnee").innerHTML =
-    `Knee: <span style="color:${angleColor(ang.knee,IDEAL.knee)}">${ang.knee.toFixed(1)}°</span>`;
-
-document.getElementById("repCounter").innerHTML =
-    `Reps: ${repCount}`;
-
+    function color(state){
+    if (state === "good") return "rgb(0,255,0)";        // green
+    if (state === "warn") return "rgb(255,180,0)";      // soft amber
+    return "rgb(255,60,60)";                            // red (rare)
 }
 
 
-const socket = io({
-    transports: ["websocket"],
-    upgrade: false
-});
+    angleNeck.innerHTML=`Neck: <span style="color:${color(states.neck)}">${ang.neck.toFixed(1)}°</span>`;
+    angleElbow.innerHTML=`Elbow: <span style="color:${color(states.elbow)}">${ang.elbow.toFixed(1)}°</span>`;
+    angleBody.innerHTML=`Body: <span style="color:${color(states.body)}">${ang.body.toFixed(1)}°</span>`;
+    angleKnee.innerHTML=`Knee: <span style="color:${color(states.knee)}">${ang.knee.toFixed(1)}°</span>`;
+    repCounter.innerHTML=`Reps: ${repCount}`;
 
+    sendResponseData({
+        reps:repCount,
+        angles:ang,
+        angle_status:states,
+        bad_counts:badCounts,
+        ecg:{mean:ecgY.reduce((a,b)=>a+b,0)/Math.max(ecgY.length,1),peak:Math.max(...ecgY,0)},
+        emg:{mean:emgY.reduce((a,b)=>a+b,0)/Math.max(emgY.length,1),peak:Math.max(...emgY,0)}
+    });
+}
 
-socket.on("pose", data=>{
-    if(!initialized){
-        initSkeleton(data);
-        initialized=true;
-    }
-    updateSkeleton(data);
-});
+const socket=io({transports:["websocket"],upgrade:false});
+socket.on("pose",d=>{if(!initialized){initSkeleton(d);initialized=true;}updateSkeleton(d);});
 
-(function animate(){
-    requestAnimationFrame(animate);
-    renderer.render(scene,camera);
-})();
+(function animate(){requestAnimationFrame(animate);renderer.render(scene,camera);})();
+
+let lastWrite=0;
+function sendResponseData(p){
+    const n=performance.now();
+    if(n-lastWrite<500) return;
+    lastWrite=n;
+    fetch("/update_response_data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
+}
 </script>
 
 </body>

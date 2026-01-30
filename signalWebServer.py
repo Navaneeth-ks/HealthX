@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO
 import json
 import os
@@ -62,6 +62,20 @@ def capture_pose():
 # =========================
 # Routes
 # =========================
+@app.route("/update_response_data", methods=["POST"])
+def update_response_data():
+    try:
+        data = request.json
+        data["timestamp"] = time.time()
+
+        with open(os.path.join("data", "responseData.json"), "w") as f:
+            json.dump(data, f, indent=2)
+
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
