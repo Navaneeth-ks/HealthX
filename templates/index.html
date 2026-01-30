@@ -60,6 +60,23 @@ body {
     background: black;
     border-left: 1px solid #222;
 }
+#aiTitle {
+    font-size: 18px;
+    font-weight: bold;
+    color: #00ff66;           /* HealthX green */
+    padding: 14px 14px 6px;
+    border-bottom: 1px solid #1a1a1a;
+    letter-spacing: 0.5px;
+}
+
+#aiContent {
+    padding: 14px;
+    font-family: monospace;
+    font-size: 14px;
+    white-space: pre-line;
+    color: #d0ffd0;
+}
+
 </style>
 </head>
 
@@ -90,7 +107,11 @@ body {
 </div>
 </div>
 
-<div id="aiPanel"></div>
+<div id="aiPanel">
+    <div id="aiTitle">Coach</div>
+    <div id="aiContent">AI loading...</div>
+</div>
+
 
 </div>
 
@@ -311,7 +332,29 @@ function sendResponseData(p){
     lastWrite=n;
     fetch("/update_response_data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
 }
+
+/* ================= AI PANEL ================= */
+
+function updateAIResponse(){
+    fetch("/ai_feedback")
+        .then(r => r.json())
+        .then(d => {
+            // backend returns { text: "..." }
+            if (!d || !d.text) return;
+
+            document.getElementById("aiContent").innerText = d.text;
+        })
+        .catch(err => {
+            console.error("AI fetch failed:", err);
+        });
+}
+
+setInterval(updateAIResponse, 10000);
+updateAIResponse();
+
 </script>
+
+
 
 </body>
 </html>

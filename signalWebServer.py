@@ -8,24 +8,33 @@ import threading
 import time
 
 # =========================
+# AI IMPORT
+# =========================
+from aiLLM import generate_ai_feedback
+
+# =========================
 # Flask + SocketIO
 # =========================
 app = Flask(__name__)
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode="threading",
-    ping_timeout=5,
-    ping_interval=5
-)
-
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # =========================
-# Data files
+# Data paths
 # =========================
-dataFolder = "data"
-ecgFile = os.path.join(dataFolder, "ecgData.json")
-emgFile = os.path.join(dataFolder, "emgData.json")
+DATA_DIR = "data"
+ECG_FILE = os.path.join(DATA_DIR, "ecgData.json")
+EMG_FILE = os.path.join(DATA_DIR, "emgData.json")
+RESPONSE_FILE = os.path.join(DATA_DIR, "responseData.json")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# =========================
+# AI RESPONSE CACHE
+# =========================
+ai_response_cache = {
+    "text": "AI coach warming up...",
+    "timestamp": 0
+}
 
 # =========================
 # MediaPipe Pose
@@ -54,51 +63,67 @@ def capture_pose():
                 {"x": lm.x, "y": lm.y, "z": lm.z}
                 for lm in results.pose_world_landmarks.landmark
             ]
-
-            # 🔴 FIXED EVENT NAME
             socketio.emit("pose", landmarks)
 
+        time.sleep(1 / 30)
 
 # =========================
-# Routes
+# AI BACKGROUND LOOP
 # =========================
-@app.route("/update_response_data", methods=["POST"])
-def update_response_data():
-    try:
-        data = request.json
-        data["timestamp"] = time.time()
+def ai_feedback_loop():
+    global ai_response_cache
 
-        with open(os.path.join("data", "responseData.json"), "w") as f:
-            json.dump(data, f, indent=2)
+    while True:
+        try:
+            ai_response_cache["text"] = generate_ai_feedback()
+            ai_response_cache["timestamp"] = time.time()
+        except Exception as e:
+            ai_response_cache["text"] = f"AI error: {e}"
 
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        time.sleep(10)
 
-
+# =========================
+# ROUTES
+# =========================
 @app.route("/")
 def index():
     return render_template("index.html")
 
 @app.route("/ecg")
-def getEcg():
+def get_ecg():
     try:
-        with open(ecgFile, "r") as f:
+        with open(ECG_FILE, "r") as f:
             return jsonify(json.load(f))
     except:
         return jsonify({"ecgValues": []})
 
 @app.route("/emg")
-def getEmg():
+def get_emg():
     try:
-        with open(emgFile, "r") as f:
+        with open(EMG_FILE, "r") as f:
             return jsonify(json.load(f))
     except:
         return jsonify({"emgValues": []})
 
+@app.route("/update_response_data", methods=["POST"])
+def update_response_data():
+    try:
+        data = request.json
+        with open(RESPONSE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/ai_feedback")
+def ai_feedback():
+    return jsonify(ai_response_cache)
+
 # =========================
-# Main
+# MAIN
 # =========================
 if __name__ == "__main__":
     threading.Thread(target=capture_pose, daemon=True).start()
+    threading.Thread(target=ai_feedback_loop, daemon=True).start()
+
     socketio.run(app, host="127.0.0.1", port=5000, debug=False)
