@@ -39,11 +39,14 @@ body {
 }
 
 #poseBox {
+    
     width: 96%;
     height: 94%;
     background: #000000;
     border-radius: 26px;
     box-shadow: inset 0 0 0 2px #000000, 0 0 50px rgba(0,0,0,0.9);
+    
+    
 }
 
 #poseCanvas {
@@ -66,10 +69,26 @@ body {
     </div>
 
     <div id="posePanel">
-        <div id="poseBox">
-            <div id="poseCanvas"></div>
+    <div id="poseBox">
+
+        <!-- ===== PUSH-UP ANALYSIS OVERLAY ===== -->
+        <div id="analysisOverlay">
+            <div id="angleNeck">Neck: --</div>
+            <div id="angleElbow">Elbow: --</div>
+            <div id="angleBody">Body: --</div>
+            <div id="angleKnee">Knee: --</div>
+
+            <hr>
+
+            <div id="repCounter">Reps: 0</div>
         </div>
+
+        <!-- ===== THREE.JS CANVAS ===== -->
+        <div id="poseCanvas"></div>
+
     </div>
+</div>
+
 
 </div>
 
@@ -162,6 +181,45 @@ const POSE_CONNECTIONS = [
 
 let joints=[], bones=[], initialized=false;
 
+/* ================= PUSH-UP ANALYSIS ================= */
+
+let repCount = 0;
+let lastElbowAngle = 180;
+
+const IDEAL = {
+    neck:  { min:160, max:180, worst:120 },
+    elbow: { min:80,  max:110, worst:160 },
+    body:  { min:165, max:180, worst:140 },
+    knee:  { min:160, max:180, worst:120 }
+};
+
+
+function angleBetween(a,b,c){
+    const ab = new THREE.Vector3().subVectors(a,b);
+    const cb = new THREE.Vector3().subVectors(c,b);
+    return Math.acos(
+        ab.dot(cb) / (ab.length() * cb.length())
+    ) * (180 / Math.PI);
+}
+
+function angleColor(v, ideal){
+    if (v >= ideal.min && v <= ideal.max) return "rgb(0,255,0)";
+
+    const d = Math.min(
+        Math.abs(v - ideal.min),
+        Math.abs(v - ideal.max)
+    );
+
+    const t = Math.min(
+        d / Math.abs(ideal.worst - ideal.min),
+        1
+    );
+
+    return `rgb(${255*t}, ${255*(1-t)}, 0)`;
+}
+
+
+
 function initSkeleton(data){
     data.forEach(()=>{
         const j=new THREE.Mesh(
@@ -179,11 +237,13 @@ function initSkeleton(data){
     });
 }
 
+
+
 function updateSkeleton(data){
     // Anchor at shoulders (better full-body framing)
     const sL = data[11];
     const sR = data[12];
-    const Y_OFFSET = -0.6; // 🔼 moves skeleton UP (increase = higher)
+    const Y_OFFSET = -1; // 🔼 moves skeleton UP (increase = higher)
 
 
 
@@ -212,6 +272,39 @@ function updateSkeleton(data){
         pos[5] = joints[c].position.z;
         b.geometry.attributes.position.needsUpdate = true;
     });
+
+    /* ===== PUSH-UP METRICS ===== */
+const A = joints;
+
+const ang = {
+    neck:  angleBetween(A[11].position, A[0].position, A[12].position),
+    elbow: angleBetween(A[11].position, A[13].position, A[15].position),
+    body:  angleBetween(A[11].position, A[23].position, A[27].position),
+    knee:  angleBetween(A[23].position, A[25].position, A[27].position)
+};
+
+/* Rep counting (elbow dip logic) */
+if (lastElbowAngle > 100 && ang.elbow < 100) {
+    repCount++;
+}
+lastElbowAngle = ang.elbow;
+
+/* Update overlay */
+document.getElementById("angleNeck").innerHTML =
+    `Neck: <span style="color:${angleColor(ang.neck,IDEAL.neck)}">${ang.neck.toFixed(1)}°</span>`;
+
+document.getElementById("angleElbow").innerHTML =
+    `Elbow: <span style="color:${angleColor(ang.elbow,IDEAL.elbow)}">${ang.elbow.toFixed(1)}°</span>`;
+
+document.getElementById("angleBody").innerHTML =
+    `Body: <span style="color:${angleColor(ang.body,IDEAL.body)}">${ang.body.toFixed(1)}°</span>`;
+
+document.getElementById("angleKnee").innerHTML =
+    `Knee: <span style="color:${angleColor(ang.knee,IDEAL.knee)}">${ang.knee.toFixed(1)}°</span>`;
+
+document.getElementById("repCounter").innerHTML =
+    `Reps: ${repCount}`;
+
 }
 
 
