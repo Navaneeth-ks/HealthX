@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Processing</title>
+
+<style>
+body {
+    background: black;
+    color: #00ff66;
+    font-family: 'Share Tech Mono', monospace;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-size: 20px;
+}
+
+/* 🔵 Loading Spinner */
+#spinner {
+    width: 64px;
+    height: 64px;
+    border: 4px solid rgba(0, 170, 255, 0.2);
+    border-top: 4px solid #00aaff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 24px;
+}
+
+/* Smooth rotation */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>
+</head>
+
+<body>
+
+<div id="spinner"></div>
+<div id="status">initializing...</div>
+
+<script>
+const texts = ["initializing...", "analyzing...", "finalizing..."];
+let i = 0;
+
+setInterval(() => {
+    document.getElementById("status").innerText = texts[i % texts.length];
+    i++;
+}, 700);
+
+// after 3 seconds → results
+setTimeout(() => {
+    window.location.href = "/results";
+}, 3000);
+</script>
+
+</body>
+</html>

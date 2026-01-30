@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Workout Summary</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+    margin: 0;
+    background: black;
+    color: white;
+    font-family: monospace;
+}
+
+/* Page wrapper */
+#page {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Title */
+#title {
+    text-align: center;
+    color: #00ff66;
+    margin: 16px 0;
+    font-size: 22px;
+}
+
+/* Charts container */
+#container {
+    flex: 1;
+    display: flex;
+    gap: 24px;
+    padding: 24px;
+    box-sizing: border-box;
+}
+
+/* Chart cards */
+.chartBox {
+    flex: 1;
+    background: #050505;
+    border-radius: 16px;
+    padding: 16px;
+}
+
+/* Let Chart.js control sizing */
+canvas {
+    max-width: 100%;
+    max-height: 100%;
+}
+</style>
+</head>
+
+<body>
+
+<div id="page">
+
+<div id="title">Workout Summary</div>
+
+<div id="container">
+    <div class="chartBox">
+        <canvas id="errorChart"></canvas>
+    </div>
+    <div class="chartBox">
+        <canvas id="repChart"></canvas>
+    </div>
+</div>
+
+</div>
+
+<script>
+async function loadResults() {
+    const res = await fetch("/results_data");
+    return await res.json();
+}
+
+async function drawCharts() {
+    const data = await loadResults();
+
+    /* ========= JOINT ERROR HISTOGRAM ========= */
+    const joints = Object.keys(data.joint_errors || {});
+    const errors = Object.values(data.joint_errors || {});
+
+    new Chart(document.getElementById("errorChart"), {
+        type: "bar",
+        data: {
+            labels: joints,
+            datasets: [{
+                label: "Form Error (%)",
+                data: errors,
+                backgroundColor: [
+                    "#ff5555",
+                    "#ffaa00",
+                    "#66ccff",
+                    "#aa66ff"
+                ]
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    min: 0,
+                    max: 100,
+                    title: {
+                        display: true,
+                        text: "Error (%)",
+                        color: "#aaa"
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: "Body Part",
+                        color: "#aaa"
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    labels: { color: "#aaa" }
+                }
+            }
+        }
+    });
+
+    /* ========= REPS vs TIME ========= */
+    new Chart(document.getElementById("repChart"), {
+        type: "line",
+        data: {
+            labels: data.time,
+            datasets: [{
+                label: "Reps",
+                data: data.reps,
+                borderColor: "cyan",
+                borderWidth: 2,
+                stepped: true,
+                pointRadius: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: "Time (seconds)",
+                        color: "#aaa"
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: "Reps",
+                        color: "#aaa"
+                    },
+                    ticks: { precision: 0 }
+                }
+            },
+            plugins: {
+                legend: {
+                    labels: { color: "#aaa" }
+                }
+            }
+        }
+    });
+}
+
+drawCharts();
+</script>
+
+
+</body>
+</html>

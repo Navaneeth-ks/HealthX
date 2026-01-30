@@ -76,9 +76,25 @@ body {
     white-space: pre-line;
     color: #d0ffd0;
 }
+#stopWorkoutBtn {
+    position: fixed;
+    bottom: 20px;
+    right: 24px;
+    padding: 12px 18px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    background: #de4466;
+    color: black;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    z-index: 20;
+}
+
 
 </style>
 </head>
+<button id="stopWorkoutBtn">Stop Workout</button>
 
 <body>
 
@@ -351,6 +367,20 @@ function updateAIResponse(){
 
 setInterval(updateAIResponse, 10000);
 updateAIResponse();
+let workoutStopped = false;
+
+document.getElementById("stopWorkoutBtn").onclick = () => {
+    workoutStopped = true;
+
+    // tell backend workout ended
+    fetch("/stop_workout", { method: "POST" }).catch(()=>{});
+
+    // stop UI updates
+    clearInterval(updateSignals);
+    
+    // go to loading screen
+    window.location.href = "/loading";
+};
 
 </script>
 
