@@ -8,7 +8,7 @@ import os
 # Configuration
 # ---------------------------
 sampleRate = 20                 # samples per second
-initialHeartRate = 70           # BPM (can be set to 0)
+initialHeartRate = 65           # BPM (can be set to 0)
 
 dataFolder = "data"
 ecgFile = os.path.join(dataFolder, "ecgData.json")

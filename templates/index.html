@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Live ECG Monitor</title>
+<title>Live Signal Monitor</title>
 
 <!-- Console / terminal font -->
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -13,16 +13,14 @@
 <style>
 /* ===========================
    🎛 COLOR CONFIGURATION
-   Change ONLY these values
    =========================== */
 :root {
-    --bg-main: #000000;          /* Page background */
-    --bg-plot: #000000;          /* Plot background */
-    --text-main: #ffffff;        /* Text color */
-    --ecg-line: #00ff66;         /* ECG waveform */
-    --grid-major: #003300;       /* Major grid */
-    --grid-minor: #001a00;       /* Minor grid */
-    --axis-line: #00ff66;        /* Axis lines */
+    --bg-main: #000000;
+    --bg-plot: #000000;
+    --text-main: #ffffff;
+    --ecg-line: #00ff66;
+    --emg-line: #00aaff;
+    --grid-major: #003300;
 }
 
 /* ===========================
@@ -42,7 +40,7 @@ body {
     letter-spacing: 2px;
 }
 
-#ecg {
+#plot {
     width: 100vw;
     height: 90vh;
 }
@@ -51,8 +49,8 @@ body {
 
 <body>
 
-<div id="header">LIVE ECG MONITOR</div>
-<div id="ecg"></div>
+<div id="header">INITIALISING…</div>
+<div id="plot"></div>
 
 <script>
 /* ===========================
@@ -61,77 +59,96 @@ body {
 const sampleRate = 20;
 const displayWindowSeconds = 10;
 
-let ecgX = [];
-let ecgY = [];
+let xData = [];
+let yData = [];
 let currentSecond = 0;
+
+let mode = null;       // "ecg" or "emg"
+let endpoint = null;
+let lineColor = null;
+
+/* ===========================
+   Detect Mode
+   =========================== */
+async function detectMode() {
+    try {
+        const res = await fetch("/emg");
+        const data = await res.json();
+        if (data.emgValues) {
+            mode = "emg";
+            endpoint = "/emg";
+            lineColor = getComputedStyle(document.documentElement)
+                .getPropertyValue('--emg-line');
+            document.getElementById("header").innerText = "LIVE EMG MONITOR";
+            return;
+        }
+    } catch {}
+
+    // Fallback to ECG
+    mode = "ecg";
+    endpoint = "/ecg";
+    lineColor = getComputedStyle(document.documentElement)
+        .getPropertyValue('--ecg-line');
+    document.getElementById("header").innerText = "LIVE ECG MONITOR";
+}
 
 /* ===========================
    Plot Layout
    =========================== */
 const layout = {
-    paper_bgcolor: getComputedStyle(document.documentElement)
-        .getPropertyValue('--bg-main'),
-    plot_bgcolor: getComputedStyle(document.documentElement)
-        .getPropertyValue('--bg-plot'),
-
+    paper_bgcolor: "black",
+    plot_bgcolor: "black",
     xaxis: {
         title: "Time (seconds)",
-        color: getComputedStyle(document.documentElement)
-            .getPropertyValue('--text-main'),
-        gridcolor: getComputedStyle(document.documentElement)
-            .getPropertyValue('--grid-major'),
-        zeroline: false,
+        color: "white",
+        gridcolor: "#003300",
         range: [0, displayWindowSeconds]
     },
-
     yaxis: {
         title: "Amplitude",
-        color: getComputedStyle(document.documentElement)
-            .getPropertyValue('--text-main'),
-        gridcolor: getComputedStyle(document.documentElement)
-            .getPropertyValue('--grid-major'),
-        zeroline: false,
-        range: [-0.6, 1.2]
+        color: "white",
+        gridcolor: "#003300",
+        range: [-1.2, 1.2]
     },
-
     font: {
         family: "Share Tech Mono",
-        color: getComputedStyle(document.documentElement)
-            .getPropertyValue('--text-main')
+        color: "white"
     }
 };
 
 /* ===========================
    Initialize Plot
    =========================== */
-Plotly.newPlot("ecg", [{
-    x: ecgX,
-    y: ecgY,
+Plotly.newPlot("plot", [{
+    x: xData,
+    y: yData,
     mode: "lines",
-    line: {
-        color: getComputedStyle(document.documentElement)
-            .getPropertyValue('--ecg-line'),
-        width: 2
-    }
+    line: { color: "#ffffff", width: 2 }
 }], layout, { displayModeBar: false });
 
 /* ===========================
-   Data Update Loop
+   Update Loop
    =========================== */
-async function updateEcg() {
+async function updateSignal() {
+    if (!endpoint) return;
+
     try {
-        const response = await fetch("/ecg");
+        const response = await fetch(endpoint);
         const data = await response.json();
 
-        if (!data.ecgValues || data.ecgValues.length === 0) return;
+        const values =
+            mode === "ecg" ? data.ecgValues :
+            mode === "emg" ? data.emgValues :
+            [];
 
-        const values = data.ecgValues;
+        if (!values || values.length === 0) return;
+
         const xValues = values.map((_, i) =>
             currentSecond + i / sampleRate
         );
 
-        ecgX.push(...xValues);
-        ecgY.push(...values);
+        xData.push(...xValues);
+        yData.push(...values);
 
         const windowStart = Math.max(
             0,
@@ -139,15 +156,15 @@ async function updateEcg() {
         );
         const windowEnd = windowStart + displayWindowSeconds;
 
-        // Trim old points
-        while (ecgX.length && ecgX[0] < windowStart) {
-            ecgX.shift();
-            ecgY.shift();
+        while (xData.length && xData[0] < windowStart) {
+            xData.shift();
+            yData.shift();
         }
 
-        Plotly.update("ecg", {
-            x: [ecgX],
-            y: [ecgY]
+        Plotly.update("plot", {
+            x: [xData],
+            y: [yData],
+            line: [{ color: lineColor }]
         }, {
             "xaxis.range": [windowStart, windowEnd]
         });
@@ -155,11 +172,17 @@ async function updateEcg() {
         currentSecond += 1;
 
     } catch (err) {
-        console.error("ECG fetch failed");
+        console.error("Signal fetch failed");
     }
 }
 
-setInterval(updateEcg, 1000);
+/* ===========================
+   Startup
+   =========================== */
+(async () => {
+    await detectMode();
+    setInterval(updateSignal, 1000);
+})();
 </script>
 
 </body>
