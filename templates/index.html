@@ -2,156 +2,237 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Live ECG & EMG Monitor</title>
+<title>HealthX Monitor</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
 <style>
-:root {
-    --bg-main: #000000;
-    --bg-plot: #000000;
-    --text-main: #ffffff;
-    --ecg-line: #00ff66;
-    --emg-line: #00aaff;
-    --grid-major: #003300;
-}
-
 body {
     margin: 0;
-    background-color: var(--bg-main);
+    background: black;
+    color: white;
     font-family: 'Share Tech Mono', monospace;
-    color: var(--text-main);
+    overflow: hidden;
 }
 
-#header {
-    text-align: center;
+#layout {
+    display: grid;
+    grid-template-columns: 22% 78%;
+    height: 100vh;
+}
+
+#left {
     padding: 12px;
-    font-size: 22px;
-    letter-spacing: 2px;
 }
 
 .plot {
-    width: 100vw;
-    height: 45vh;
+    height: 44vh;
+}
+
+#posePanel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#poseBox {
+    width: 96%;
+    height: 94%;
+    background: #000000;
+    border-radius: 26px;
+    box-shadow: inset 0 0 0 2px #000000, 0 0 50px rgba(0,0,0,0.9);
+}
+
+#poseCanvas {
+    width: 100%;
+    height: 100%;
 }
 </style>
 </head>
 
 <body>
 
-<div id="header">LIVE ECG & EMG MONITOR</div>
+<div id="layout">
 
-<div id="ecgPlot" class="plot"></div>
-<div id="emgPlot" class="plot"></div>
+    <div id="left">
+        <h3>ECG</h3>
+        <div id="ecgPlot" class="plot"></div>
+
+        <h3>EMG</h3>
+        <div id="emgPlot" class="plot"></div>
+    </div>
+
+    <div id="posePanel">
+        <div id="poseBox">
+            <div id="poseCanvas"></div>
+        </div>
+    </div>
+
+</div>
 
 <script>
+/* ================= ECG + EMG ================= */
 const sampleRate = 20;
 const displayWindowSeconds = 10;
+let ecgX=[], ecgY=[], emgX=[], emgY=[], currentSecond=0;
 
-let ecgX = [], ecgY = [];
-let emgX = [], emgY = [];
-let currentSecond = 0;
-
-/* ===========================
-   Layouts
-   =========================== */
-function baseLayout(title, yRange) {
+function baseLayout(title, range) {
     return {
-        title: title,
-        paper_bgcolor: "black",
-        plot_bgcolor: "black",
-        xaxis: {
-            title: "Time (seconds)",
-            color: "white",
-            gridcolor: "#003300",
-            range: [0, displayWindowSeconds]
-        },
-        yaxis: {
-            title: "Amplitude",
-            color: "white",
-            gridcolor: "#003300",
-            range: yRange
-        },
-        font: {
-            family: "Share Tech Mono",
-            color: "white"
-        },
-        margin: { t: 40 }
+        title,
+        paper_bgcolor:"black",
+        plot_bgcolor:"black",
+        xaxis:{range:[0,displayWindowSeconds], gridcolor:"#003300"},
+        yaxis:{range, gridcolor:"#003300"},
+        font:{color:"white"}
     };
 }
 
-/* ===========================
-   Initialize Plots
-   =========================== */
-Plotly.newPlot("ecgPlot", [{
-    x: ecgX,
-    y: ecgY,
-    mode: "lines",
-    line: { color: "#00ff66", width: 2 }
-}], baseLayout("ECG", [-1.2, 1.2]), { displayModeBar: false });
+Plotly.newPlot("ecgPlot",[{
+    x:ecgX,y:ecgY,mode:"lines",line:{color:"#00ff66"}
+}],baseLayout("ECG",[-1.2,1.2]),{displayModeBar:false});
 
-Plotly.newPlot("emgPlot", [{
-    x: emgX,
-    y: emgY,
-    mode: "lines",
-    line: { color: "#00aaff", width: 2 }
-}], baseLayout("EMG", [-1.5, 1.5]), { displayModeBar: false });
+Plotly.newPlot("emgPlot",[{
+    x:emgX,y:emgY,mode:"lines",line:{color:"#00aaff"}
+}],baseLayout("EMG",[-1.5,1.5]),{displayModeBar:false});
 
-/* ===========================
-   Update Loop
-   =========================== */
-async function updateSignals() {
-    try {
-        const ecgRes = await fetch("/ecg");
-        const emgRes = await fetch("/emg");
+async function updateSignals(){
+    const ecg=await fetch("/ecg").then(r=>r.json());
+    const emg=await fetch("/emg").then(r=>r.json());
+    if(!ecg.ecgValues||!emg.emgValues) return;
 
-        const ecgData = await ecgRes.json();
-        const emgData = await emgRes.json();
+    const x=ecg.ecgValues.map((_,i)=>currentSecond+i/sampleRate);
+    ecgX.push(...x); ecgY.push(...ecg.ecgValues);
+    emgX.push(...x); emgY.push(...emg.emgValues);
 
-        if (!ecgData.ecgValues || !emgData.emgValues) return;
-
-        const xValues = ecgData.ecgValues.map((_, i) =>
-            currentSecond + i / sampleRate
-        );
-
-        ecgX.push(...xValues);
-        ecgY.push(...ecgData.ecgValues);
-
-        emgX.push(...xValues);
-        emgY.push(...emgData.emgValues);
-
-        const windowStart = Math.max(
-            0,
-            currentSecond - displayWindowSeconds + 1
-        );
-        const windowEnd = windowStart + displayWindowSeconds;
-
-        while (ecgX.length && ecgX[0] < windowStart) {
-            ecgX.shift();
-            ecgY.shift();
-            emgX.shift();
-            emgY.shift();
-        }
-
-        Plotly.update("ecgPlot", {
-            x: [ecgX],
-            y: [ecgY]
-        }, { "xaxis.range": [windowStart, windowEnd] });
-
-        Plotly.update("emgPlot", {
-            x: [emgX],
-            y: [emgY]
-        }, { "xaxis.range": [windowStart, windowEnd] });
-
-        currentSecond += 1;
-
-    } catch (err) {
-        console.error("Signal fetch failed");
+    const ws=Math.max(0,currentSecond-displayWindowSeconds+1);
+    while(ecgX.length&&ecgX[0]<ws){
+        ecgX.shift(); ecgY.shift();
+        emgX.shift(); emgY.shift();
     }
+
+    Plotly.update("ecgPlot",{x:[ecgX],y:[ecgY]},{"xaxis.range":[ws,ws+displayWindowSeconds]});
+    Plotly.update("emgPlot",{x:[emgX],y:[emgY]},{"xaxis.range":[ws,ws+displayWindowSeconds]});
+    currentSecond++;
+}
+setInterval(updateSignals,1000);
+
+/* ================= MEDIAPIPE 3D ================= */
+const container = document.getElementById("poseCanvas");
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1e1e1e);
+
+const camera = new THREE.PerspectiveCamera(50,1,0.01,100);
+camera.position.set(0,1.2,4);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+container.appendChild(renderer.domElement);
+
+function resize(){
+    const w=container.clientWidth,h=container.clientHeight;
+    renderer.setSize(w,h,false);
+    camera.aspect=w/h;
+    camera.updateProjectionMatrix();
+}
+resize(); window.addEventListener("resize",resize);
+
+const skeleton = new THREE.Group();
+scene.add(skeleton);
+
+const POSE_CONNECTIONS = [
+
+  /* ===== ARMS ===== */
+  [11,13],[13,15],
+  [15,17],[15,19],[15,21],      // left hand
+  [12,14],[14,16],
+  [16,18],[16,20],[16,22],      // right hand
+
+  /* ===== TORSO ===== */
+  [11,12],
+  [11,23],[12,24],
+  [23,24],
+
+  /* ===== LEGS ===== */
+  [23,25],[25,27],
+  [24,26],[26,28]
+];
+
+let joints=[], bones=[], initialized=false;
+
+function initSkeleton(data){
+    data.forEach(()=>{
+        const j=new THREE.Mesh(
+            new THREE.SphereGeometry(0.04),
+            new THREE.MeshBasicMaterial({color:0xffffff})
+        );
+        skeleton.add(j); joints.push(j);
+    });
+
+    POSE_CONNECTIONS.forEach(()=>{
+        const g=new THREE.BufferGeometry();
+        g.setAttribute("position",new THREE.Float32BufferAttribute([0,0,0,0,0,0],3));
+        const l=new THREE.Line(g,new THREE.LineBasicMaterial({color:0x00ff66}));
+        skeleton.add(l); bones.push(l);
+    });
 }
 
-setInterval(updateSignals, 1000);
+function updateSkeleton(data){
+    // Anchor at shoulders (better full-body framing)
+    const sL = data[11];
+    const sR = data[12];
+    const Y_OFFSET = -0.6; // 🔼 moves skeleton UP (increase = higher)
+
+
+
+    const cx = (sL.x + sR.x) / 2;
+    const cy = (sL.y + sR.y) / 2 - Y_OFFSET;
+    const cz = (sL.z + sR.z) / 2;
+
+    const SCALE = 2.0;
+
+    data.forEach((p,i)=>{
+        joints[i].position.set(
+            (p.x - cx) * SCALE,
+            -(p.y - cy) * SCALE,
+            -(p.z - cz) * SCALE
+        );
+    });
+
+    bones.forEach((b,i)=>{
+        const [a,c] = POSE_CONNECTIONS[i];
+        const pos = b.geometry.attributes.position.array;
+        pos[0] = joints[a].position.x;
+        pos[1] = joints[a].position.y;
+        pos[2] = joints[a].position.z;
+        pos[3] = joints[c].position.x;
+        pos[4] = joints[c].position.y;
+        pos[5] = joints[c].position.z;
+        b.geometry.attributes.position.needsUpdate = true;
+    });
+}
+
+
+const socket = io({
+    transports: ["websocket"],
+    upgrade: false
+});
+
+
+socket.on("pose", data=>{
+    if(!initialized){
+        initSkeleton(data);
+        initialized=true;
+    }
+    updateSkeleton(data);
+});
+
+(function animate(){
+    requestAnimationFrame(animate);
+    renderer.render(scene,camera);
+})();
 </script>
 
 </body>
